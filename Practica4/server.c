@@ -1,79 +1,69 @@
+#include<sys/types.h>
+#include<sys/shm.h>
+#include<sys/ipc.h>
+#include<sys/sem.h>
 #include<stdio.h>
 #include<stdlib.h>
 #include<unistd.h>
-#include<sys/ipc.h>
-#include<sys/shm.h>
-#include<sys/sem.h>
-#include<sys/types.h>
-#include <pthread.h>
+#include<pthread.h>
+#include<string.h>
 
-int *semid;
-int *clientId;
-char (*frase);
-
-int CreaSemaforo( key_t llave, int valor_inicial){
-    int semid= semget(llave, 1, IPC_CREAT|0644);
-    if(semid==-1){
-        perror("Error al crear el semaforo");
-        exit(1);
-    }
-    semctl (semid, 0, SETVAL, valor_inicial);
-    return semid;
+int crea_semaforo(key_t llave,int valor_inicial)
+{
+   int semid=semget(llave,1,IPC_CREAT|0777);
+   if(semid==-1)
+   {
+      return -1;
+   }
+   semctl(semid,0,SETVAL,valor_inicial);
+   return semid;
 }
 
-void* AttendClient(void* args){
-    printf("hilo...");
+void down(int semid)
+{
+   struct sembuf op_p[]={0,-1,0};
+   semop(semid,op_p,1);
 }
 
-void CreateCriticalZone(int semaforo){
-    pthread_t th;
-    key_t keyFrase, keyClientId, keySemId, keySemValue;
-    int shmBuffidfrase, shmBuffidclientid,shmBuffidSemId;
-
-    keyFrase = ftok("frase", 'p');
-    keyClientId = ftok("clienteid", 'p');
-    keySemId = ftok("semid", 'p');
-
-    shmBuffidfrase = shmget(keyFrase, (100*sizeof(char)), IPC_CREAT|0777);
-    shmBuffidclientid = shmget(keyClientId, sizeof(int), IPC_CREAT|0777);
-    shmBuffidSemId = shmget(keySemId, sizeof(int), IPC_CREAT|0777);
-
-    if( shmBuffidclientid == -1 || shmBuffidfrase == -1 ){
-        perror("Error 1 al reservar la memoria compartida");
-        exit(1);
-    }else{
-        frase = shmat(shmBuffidfrase, 0, 0);
-        clientId = shmat(shmBuffidclientid, 0, 0);
-        semid = shmat(shmBuffidSemId,0,0);
-        *clientId = 0;
-        *semid = semaforo;
-        if( frase == (void *)-1 || clientId == (void *)-1 ){
-            perror("Error 2 al reservar la memoria compartida");
-            exit(1);
-        }
-        while(1){
-            printf("%d", semctl(semaforo, 0, GETVAL));
-            if( *clientId != 0 ){
-                printf("Atenediendo al cliente %d\n", *clientId);
-                if( pthread_create(&th, NULL, &AttendClient, NULL) != 0 ){
-                    perror("Erro al crar el hilo\n");
-                }
-                sleep(1);
-            }else{
-                printf("Waiting...\n");
-                sleep(1);
-            }
-        }
-
-    }
+void up(int semid)
+{
+   struct sembuf op_v[]={0,+1,0};
+   semop(semid,op_v,1);
 }
 
-int main(int argc, int* argv[]){
-    key_t llave_semaforo;
-    int semaforo_mutex;
+void AtiendeCliente(){
+   int id_cliente;
+   char str[1024];
+   struct client{
+      int pid;
+      char frase[100];
+   } *cliente;
+   key_t llave_cliente;
+   llave_cliente = ftok("archivo_clientes", 'c');
+   id_cliente = shmget(llave_cliente, sizeof(struct client), IPC_CREAT|0777);
+   cliente = (struct client *)shmat(id_cliente,0,0);
+   sprintf(str, "%d", cliente->pid);
+   printf("%s\n", str);
+   printf("Atendiendo al ciente: %d\n", cliente->pid);
+   puts(cliente->frase);
+   pthread_exit(NULL);
+}
 
-    llave_semaforo = ftok("semid", 'p');
-    semaforo_mutex = CreaSemaforo(llave_semaforo, 1);
-    CreateCriticalZone(semaforo_mutex);
-    return 0;
+int main()
+{
+   int mutex;
+   key_t llave_mutex;
+   pthread_t id_hilo;
+   pthread_attr_t atributos;
+   llave_mutex=ftok("semaforo_mutex",'s');
+   mutex=crea_semaforo(llave_mutex,0);
+   pthread_attr_init(&atributos);
+   pthread_attr_setdetachstate(&atributos,PTHREAD_CREATE_DETACHED);
+   
+   while(1)
+   {
+      printf("Servidor con pid %d esperando cliente...\n",getpid());
+      down(mutex);
+      pthread_create(&id_hilo,&atributos,(void*)AtiendeCliente,NULL);
+   }
 }
