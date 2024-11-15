@@ -42,8 +42,6 @@ void AtiendeCliente(){
    llave_cliente = ftok("archivo_clientes", 'c');
    id_cliente = shmget(llave_cliente, sizeof(struct client), IPC_CREAT|0777);
    cliente = (struct client *)shmat(id_cliente,0,0);
-   sprintf(str, "%d", cliente->pid);
-   printf("%s\n", str);
    printf("Atendiendo al ciente: %d\n", cliente->pid);
    puts(cliente->frase);
    pthread_exit(NULL);
